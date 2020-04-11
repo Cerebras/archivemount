@@ -456,9 +456,11 @@ build_tree(const char *mtpt)
 	}
 	/* check if format or compression prohibits writability */
 	format = archive_format(archive);
-	//	log("FORMAT=%s",archive_format_name(archive));
+        log("mounted archive format is %s (0x%x)",
+            archive_format_name(archive), format);
 	compression = archive_filter_code(archive, 0);
-	//	log("COMPRESSION=%s",archive_compression_name(archive));
+        log("mounted archive compression is %s (0x%x)",
+            archive_filter_name(archive, 0), compression);
 	if (format & ARCHIVE_FORMAT_ISO9660
 		|| format & ARCHIVE_FORMAT_ISO9660_ROCKRIDGE
 		|| format & ARCHIVE_FORMAT_ZIP
@@ -705,7 +707,7 @@ rename_recursively(NODE *start, const char *from, const char *to)
 	   into an array first and iterate over that instead */
 	size_t count = HASH_COUNT(start);
 	NODE *nodes[count];
-	log ("%s has %u items", start->parent->name, count);
+	log ("%s has %zu items", start->parent->name, count);
 	NODE **dst = &nodes[0];
 	while (node) {
 		*dst = node;
@@ -936,16 +938,17 @@ save(const char *archiveFile)
 		log("%s", archive_error_string(oldarc));
 		return archive_errno(oldarc);
 	}
+        /* Read first header of oldarc so that archive format is set. */
+        if (archive_read_next_header(oldarc, &entry) != ARCHIVE_OK) {
+		log("%s", archive_error_string(oldarc));
+		return archive_errno(oldarc);
+        }
 	format = archive_format(oldarc);
 	compression = archive_filter_code(oldarc, 0);
-	/*
-	   log("format of old archive is %s (%d)",
-	   archive_format_name(oldarc),
-	   format);
-	   log("compression of old archive is %s (%d)",
-	   archive_compression_name(oldarc),
-	   compression);
-	   */
+        log("mounted archive format is %s (0x%x)",
+            archive_format_name(oldarc), format);
+        log("mounted archive compression is %s (0x%x)",
+            archive_filter_name(oldarc, 0), compression);
 	/* open new archive */
 	if ((newarc = archive_write_new()) == NULL) {
 		log("Out of memory");
@@ -964,38 +967,7 @@ save(const char *archiveFile)
 			archive_write_add_filter_none(newarc);
 			break;
 	}
-#if 0
 	if (archive_write_set_format(newarc, format) != ARCHIVE_OK) {
-		return -ENOTSUP;
-	}
-#endif
-	if (format & ARCHIVE_FORMAT_CPIO
-		|| format & ARCHIVE_FORMAT_CPIO_POSIX)
-	{
-		archive_write_set_format_cpio(newarc);
-		//log("set write format to posix-cpio");
-	} else if (format & ARCHIVE_FORMAT_SHAR
-		|| format & ARCHIVE_FORMAT_SHAR_BASE
-		|| format & ARCHIVE_FORMAT_SHAR_DUMP)
-	{
-		archive_write_set_format_shar(newarc);
-		//log("set write format to binary shar");
-	} else if (format & ARCHIVE_FORMAT_TAR_PAX_RESTRICTED)
-	{
-		archive_write_set_format_pax_restricted(newarc);
-		//log("set write format to binary pax restricted");
-	} else if (format & ARCHIVE_FORMAT_TAR_PAX_INTERCHANGE)
-	{
-		archive_write_set_format_pax(newarc);
-		//log("set write format to binary pax interchange");
-	} else if (format & ARCHIVE_FORMAT_TAR_USTAR
-		|| format & ARCHIVE_FORMAT_TAR
-		|| format & ARCHIVE_FORMAT_TAR_GNUTAR
-		|| format == 0)
-	{
-		archive_write_set_format_ustar(newarc);
-		//log("set write format to ustar");
-	} else {
 		log("writing archives of format %d (%s) is not "
 			"supported", format,
 			archive_format_name(oldarc));
@@ -1012,7 +984,7 @@ save(const char *archiveFile)
 		log("%s", archive_error_string(newarc));
 		return archive_errno(newarc);
 	}
-	while (archive_read_next_header(oldarc, &entry) == ARCHIVE_OK) {
+	do {
 		off_t offset;
 		const void *buf;
 		struct archive_entry *wentry;
@@ -1084,7 +1056,7 @@ save(const char *archiveFile)
 		}
 		/* clean up */
 		archive_entry_free(wentry);
-	} /* end: while read next header */
+	} while (archive_read_next_header(oldarc, &entry) == ARCHIVE_OK);
 	/* find new files to add (those do still have modified flag set */
 	while ((node = find_modified_node(root))) {
 		if (node->namechanged) {
@@ -2430,7 +2402,6 @@ ar_rename(const char *from, const char *to)
 {
 	NODE *from_node;
 	int ret = 0;
-	char *old_name;
 	char *temp_name;
 
 	log("ar_rename called, from: '%s', to: '%s'", from, to);
